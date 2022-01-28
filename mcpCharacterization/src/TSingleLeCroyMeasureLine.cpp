@@ -5,7 +5,7 @@
  *      Author: mss
  */
 
-#include "TSingleLeCroyMeasureLine.h"
+#include "../inc/TSingleLeCroyMeasureLine.h"
 
 namespace std {
 

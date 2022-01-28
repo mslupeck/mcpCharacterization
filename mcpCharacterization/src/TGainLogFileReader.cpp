@@ -5,7 +5,7 @@
  *      Author: mss
  */
 
-#include "TGainLogFileReader.h"
+#include "../inc/TGainLogFileReader.h"
 
 namespace std {
 

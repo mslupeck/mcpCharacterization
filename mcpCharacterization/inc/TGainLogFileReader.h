@@ -9,7 +9,7 @@
 #define TGAINLOGFILEREADER_H_
 
 #include "TSingleGainLogLine.h"
-#include "TAsciiFileReader.cpp" // cpp needed because TAsciiFileReader is a template
+#include "../src/TAsciiFileReader.cpp" // cpp file needed because TAsciiFileReader is a template
 #include "helpers.h"
 
 namespace std {

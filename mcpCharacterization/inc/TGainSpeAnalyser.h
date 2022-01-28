@@ -9,6 +9,7 @@
 #define TGAINSPEANALYSER_H_
 
 #include <iostream>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <iomanip>
@@ -20,6 +21,7 @@
 #include <TPad.h>
 #include <TLegend.h>
 #include <TF1.h>
+#include <TH1D.h>
 #include <TMath.h>
 #include <TFormula.h>
 #include <TGraph.h>
@@ -30,6 +32,7 @@
 #include <TLine.h>
 #include <TLatex.h>
 #include <TGaxis.h>
+#include <TStyle.h>
 #include <TVector.h>
 
 namespace std {
@@ -49,6 +52,7 @@ struct TSpeGainContainer{
 	int nMcp;
 	int nQuadrant;
 	TGraph* grSpeCharge;
+	TGraph* grSpeChargeWithoutExp; // additional, derived plot
 	TGraph* grSpeAmp;
 	vector<TSingleLineGainContainer*> vRawGain;
 
@@ -60,7 +64,7 @@ struct TSpeGainContainer{
 	TGraphErrors* grGain;
 };
 
-class TGainSpeAnalyser {
+class TCalibAnalyser {
 private:
 	// Fit parameters
 	float scalePedestal;
@@ -79,7 +83,7 @@ private:
 	TFile* fout;
 
 	int OpenOutputFile(string &outputFilePath);
-	void DrawSpeCharge();
+	void DrawSpeCharge(ofstream *outtxt = nullptr, string *outPdfName = nullptr);
 	void FindCommonHvForTargetGain(double targetGain, double &commonHv, double &commonGain);
 	void DrawZoomedGain(double targetGain, double x0, double x1);
 	void DrawGainCharge();
@@ -99,10 +103,10 @@ private:
 
 public:
 
-	TGainSpeAnalyser(vector<TSpeGainContainer*> *vGain, float meanSpe, int v);
-	virtual ~TGainSpeAnalyser();
+	TCalibAnalyser(vector<TSpeGainContainer*> *vGain, int v, float meanSpe = 20e-12, float scaleSpe = 80, float scaleExp = 300);
+	virtual ~TCalibAnalyser();
 
-	int AnalyseSpeCharge(string outputFilePath);
+	int AnalyseSpeCharge(string outputFilePath, ofstream *outtxt = nullptr, string *outPdfName = nullptr);
 	int ProduceGainCurves();
 	int SaveAndCloseOutputFiles();
 

@@ -5,7 +5,7 @@
  *      Author: mss
  */
 
-#include "cliParams.h"
+#include "../inc/cliParams.h"
 
 cliParams::cliParams() {}
 

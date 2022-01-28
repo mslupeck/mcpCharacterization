@@ -5,7 +5,7 @@
  *      Author: mss
  */
 
-#include "TSingleGainLogLine.h"
+#include "../inc/TSingleGainLogLine.h"
 
 namespace std {
 

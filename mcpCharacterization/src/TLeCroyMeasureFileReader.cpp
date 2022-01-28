@@ -5,7 +5,7 @@
  *      Author: mss
  */
 
-#include "TLeCroyMeasureFileReader.h"
+#include "../inc/TLeCroyMeasureFileReader.h"
 
 namespace std {
 

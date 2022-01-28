@@ -6,7 +6,7 @@
  *  Adjusted for HV monitoring CAEN Gecko logs on 28.02.2019
  */
 
-#include "TAsciiFileReader.h"
+#include "../inc/TAsciiFileReader.h"
 
 #ifndef TASCIIFILEREADER_CPP_
 #define TASCIIFILEREADER_CPP_

@@ -5,7 +5,7 @@
  *      Author: mss
  */
 
-#include "cliParser.h"
+#include "../inc/cliParser.h"
 
 cliParser::cliParser() {}
 

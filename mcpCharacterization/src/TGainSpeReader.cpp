@@ -5,7 +5,7 @@
  *      Author: mss
  */
 
-#include "TGainSpeReader.h"
+#include "../inc/TGainSpeReader.h"
 
 namespace std {
 

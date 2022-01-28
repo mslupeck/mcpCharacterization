@@ -5,11 +5,11 @@
  *      Author: mss
  */
 
-#include "TGainSpeAnalyser.h"
+#include "../inc/TGainSpeAnalyser.h"
 
 namespace std {
 
-TGainSpeAnalyser::TGainSpeAnalyser(vector<TSpeGainContainer*> *vGain, float meanSpe, int v) {
+TCalibAnalyser::TCalibAnalyser(vector<TSpeGainContainer*> *vGain, int v, float meanSpe, float scaleSpe, float scaleExp) {
 	this->vGain = vGain;
 	fout = NULL;
 	verbosity = v;
@@ -27,11 +27,11 @@ TGainSpeAnalyser::TGainSpeAnalyser(vector<TSpeGainContainer*> *vGain, float mean
 	scalePedestal = 1e4;
 	meanPedestal = 0;
 	sigmaPedestal = 1e-12;
-	scaleSpe = 150;
+	this->scaleSpe = scaleSpe;
 	this->meanSpe = meanSpe;
-	sigmaSpe = 1.5e-11;
-	scaleExp = 300;
-	shiftExp = -2.2e11;
+	sigmaSpe = 20e-12;
+	this->scaleExp = scaleExp;
+	shiftExp = -1e12;
 
 	outMeasHvGain = new TGraph(4);
 	outMeasHvGain->SetName("grMeasuredAvgGain");
@@ -43,14 +43,14 @@ TGainSpeAnalyser::TGainSpeAnalyser(vector<TSpeGainContainer*> *vGain, float mean
 	outPixelGainCorrFactorAt15k->SetName("grPixelGainCorrFactorAt15k");
 }
 
-TGainSpeAnalyser::~TGainSpeAnalyser() {
+TCalibAnalyser::~TCalibAnalyser() {
 	delete outMeasHvGain;
 	delete outSpecHvGain;
 	delete outPixelGainCorrFactorAt1M;
 	delete outPixelGainCorrFactorAt15k;
 }
 
-int TGainSpeAnalyser::OpenOutputFile(string &outFilePath){
+int TCalibAnalyser::OpenOutputFile(string &outFilePath){
 	fout = new TFile(outFilePath.c_str(), "RECREATE");
 	if(!fout->IsOpen()){
 		cout << "<E>TGainSpeAnalyser::OpenOutputFile(): Out file is not opened: " << outFilePath << endl;
@@ -62,10 +62,10 @@ int TGainSpeAnalyser::OpenOutputFile(string &outFilePath){
 	return 0;
 }
 
-string TGainSpeAnalyser::sAscDir = "AnalyseSpeCharge";
-string TGainSpeAnalyser::sPgcDir = "ProduceGainCurves";
+string TCalibAnalyser::sAscDir = "AnalyseSpeCharge";
+string TCalibAnalyser::sPgcDir = "ProduceGainCurves";
 
-int TGainSpeAnalyser::Fit(TGraph *gr, TF1* f, string &fitOption, TFile* fout=NULL, string dir="", double xmin=0, double xmax=0){
+int TCalibAnalyser::Fit(TGraph *gr, TF1* f, string &fitOption, TFile* fout=NULL, string dir="", double xmin=0, double xmax=0){
 	int fitStatus=0;
 	if(fabs(xmin-xmax)<1e-15){
 		fitStatus = gr->Fit(f, fitOption.c_str(), "");
@@ -90,16 +90,17 @@ int TGainSpeAnalyser::Fit(TGraph *gr, TF1* f, string &fitOption, TFile* fout=NUL
 	return 0;
 }
 
-int TGainSpeAnalyser::AnalyseSpeCharge(string outFilePath){
+int TCalibAnalyser::AnalyseSpeCharge(string outFilePath, ofstream *outtxt, string *outPdfName){
 	int err = OpenOutputFile(outFilePath);
 	if(err<0){
 		return err;
 	}
 
 	// Define fit function
-	string speFormula  = "  [0]*TMath::Exp(-0.5*((x-[1])/[2])*((x-[1])/[2]))";
-	speFormula        += "+ [3]*TMath::Exp(-0.5*((x-[4])/[5])*((x-[4])/[5]))";
-	speFormula        += "+ [6]*TMath::Exp(x*[7])*(x>([1]+2*[2]))";
+	string sPedestalGaus = "  [0]*TMath::Exp(-0.5*((x-[1])/[2])*((x-[1])/[2]))";
+	string sSpeGaus      = "+ [3]*TMath::Exp(-0.5*((x-[4])/[5])*((x-[4])/[5]))";
+	string sExp          = "+ [6]*TMath::Exp(x*[7])*(x>([1]+2*[2]))";
+	string speFormula    = sPedestalGaus + sSpeGaus + sExp;
 	// TODO: It's possible to add one more gaussian component, corresponding to two-photoelectron peak, visible in some cases
 
 	TF1* fSpe = new TF1("fSpe", speFormula.c_str());
@@ -119,7 +120,7 @@ int TGainSpeAnalyser::AnalyseSpeCharge(string outFilePath){
 	fSpe->SetParLimits(4, 12e-12, 80e-12);
 	fSpe->SetParLimits(5, 0.5e-11, 4e-11);
 	fSpe->SetParLimits(6, 0, 1e30);
-	fSpe->SetParLimits(7, -1e30, 0);
+	fSpe->SetParLimits(7, -1e30, -2e11);
 
 	for(uint16_t iq=0; iq<vGain->size(); iq++){
 		//if(iq!=0) continue;
@@ -183,15 +184,34 @@ int TGainSpeAnalyser::AnalyseSpeCharge(string outFilePath){
 		f->ReleaseParameter(5);
 		f->ReleaseParameter(6);
 		f->ReleaseParameter(7);
-		if(Fit(gr, f, fitOption, fout, sAscDir) != 0) return -1;
+		string fitOpt = "";
+		if(Fit(gr, f, fitOpt, fout, sAscDir) != 0) return -1;
+
+		// Make a plot with graph data minus pedestal gaus and SPE-gaus
+		stringstream f2gausOnly;
+		f2gausOnly << "f2gausOnly-" << vGain->at(iq)->nMcp << "-" << vGain->at(iq)->nQuadrant;
+		TF1* f2gaus = (TF1*)fSpe->Clone(fSpeName.str().c_str());
+		for(uint16_t ipar=0; ipar<f->GetNpar(); ipar++){
+			f2gaus->SetParameter(ipar, f->GetParameter(ipar));
+		}
+		f2gaus->SetParameter(6, 0); // Zero the exponent component of the function
+		f2gaus->SetParameter(7, 0); // Zero the exponent component of the function
+
+		TGraph *grsub = new TGraph(gr->GetN());
+		vGain->at(iq)->grSpeChargeWithoutExp = grsub;
+		for(uint16_t ipoint=0; ipoint<grsub->GetN(); ipoint++){
+			double x,y;
+			gr->GetPoint(ipoint, x, y);
+			grsub->SetPoint(ipoint, x, y-f2gaus->Eval(x));
+		}
 	}
 
-	DrawSpeCharge();
+	DrawSpeCharge(outtxt, outPdfName);
 	fout->cd();
 	return 0;
 }
 
-int TGainSpeAnalyser::ProduceGainCurves(){
+int TCalibAnalyser::ProduceGainCurves(){
 	for(uint16_t iq=0; iq<vGain->size(); iq++){
 		TSpeGainContainer* quadrantSpeGain = vGain->at(iq);
 
@@ -341,7 +361,7 @@ int TGainSpeAnalyser::ProduceGainCurves(){
 	return 0;
 }
 
-void TGainSpeAnalyser::DrawSpeCharge(){
+void TCalibAnalyser::DrawSpeCharge(ofstream *outtxt, string *outPdfName){
 	float lmargin = 0.08;
 	float rmargin = 0.07;
 	float tmargin = 0.0;
@@ -351,8 +371,9 @@ void TGainSpeAnalyser::DrawSpeCharge(){
 	cSpe->Divide(2, vGain->size()/2);
 	for(uint16_t iq=0; iq<vGain->size(); iq++){
 		cSpe->cd(iq+1);
-		gPad->SetLogy();
+		//gPad->SetLogy();
 		TGraph *gr = (TGraph*)(vGain->at(iq)->grSpeCharge->Clone());
+		TGraph *grsub = (TGraph*)(vGain->at(iq)->grSpeChargeWithoutExp->Clone());
 		gr->GetXaxis()->SetTitle("Charge [Wb]");
 		gr->GetYaxis()->SetTitle("Counts");
 		gPad->SetMargin(lmargin, rmargin, bmargin, tmargin);
@@ -363,7 +384,12 @@ void TGainSpeAnalyser::DrawSpeCharge(){
 		gr->GetYaxis()->SetLabelSize(fontsize);
 		gr->GetYaxis()->SetTitleSize(fontsize*1.15);
 		gr->GetYaxis()->SetTitleOffset(0.55);
+		gr->GetYaxis()->SetRangeUser(-40, 400);
 		gr->Draw("AL* same");
+		grsub->SetMarkerColor(kBlue);
+		grsub->SetMarkerSize(1);
+		grsub->SetMarkerStyle(8);
+		grsub->Draw("P same");
 		string padName = gr->GetTitle();
 		gr->SetTitle("");
 		padName = padName.substr(padName.find_first_of('-')+1);
@@ -371,6 +397,7 @@ void TGainSpeAnalyser::DrawSpeCharge(){
 
 		// Extract selected fit parameters
 		TF1* f = (TF1*)(gr->GetListOfFunctions()->At(gr->GetListOfFunctions()->GetSize()-1));
+		f->SetNpx(1e3);
 		if(f==NULL){
 			continue;
 		}
@@ -378,21 +405,136 @@ void TGainSpeAnalyser::DrawSpeCharge(){
 		for(int ipar=0; ipar<8; ipar++){
 			if((ipar == 1) || (ipar == 2) || (ipar == 4) || (ipar == 5)){
 				stringstream ssFitPar;
-				ssFitPar << "#font[8]{";
 				ssFitPar << left << setw(14) << f->GetParName(ipar);
 				ssFitPar.precision(3);
 				ssFitPar << setw(10) << right << f->GetParameter(ipar);
 				ssFitPar << " +/- ";
 				ssFitPar << setw(10) << right << f->GetParError(ipar);
-				ssFitPar << "}";
-				DrawTextNdc(ssFitPar.str(), 0.35, 0.8-icnt*0.06, 0.055, kRed-2, 0);
+				DrawTextNdc(ssFitPar.str(), 0.35, 0.8-icnt*0.06, 0.05, kRed-2, 0);
 				icnt++;
 			}
 		}
+
+		// Integrate exponential residual only between Pedestal mean and SPE mean
+		TF1* fSpeGausOnly = new TF1("fSpeGausOnly", "[0]*TMath::Exp(-0.5*((x-[1])/[2])*((x-[1])/[2]))");
+		fSpeGausOnly->SetParameter(0, f->GetParameter(3));
+		fSpeGausOnly->SetParameter(1, f->GetParameter(4));
+		fSpeGausOnly->SetParameter(2, f->GetParameter(5));
+		fSpeGausOnly->SetLineColor(kMagenta-1);
+		fSpeGausOnly->SetLineWidth(2);
+		fSpeGausOnly->SetNpx(1e3);
+		fSpeGausOnly->Draw("same");
+		double expWeightedIntegral = 0;
+		double expWeightSum = 0;
+		double prevY = 100;
+		for(int16_t ipoint=grsub->GetN()-1; ipoint>=0; ipoint--){
+			double xsub, ysub, x, y;
+			grsub->GetPoint(ipoint, xsub, ysub);
+			gr->GetPoint(ipoint, x, y);
+			if(x > f->GetParameter(1)){ // pedestal mean
+				if(x < f->GetParameter(4)){ // SPE mean
+					//cout << iq << "-" << ipoint << " " << xsub << ", " << ysub << "\t" << endl;
+					expWeightedIntegral += ysub*xsub;
+					expWeightSum += ysub;
+				}
+			}
+			prevY = y;
+		}
+
+		// Check bin width
+		double x1, y1, x2, y2;
+		gr->GetPoint(1, x1, y1);
+		gr->GetPoint(2, x2, y2);
+		double binWidth = x1-x2;
+
+		expWeightedIntegral /= expWeightSum;
+		expWeightedIntegral -= f->GetParameter(1);
+		double speMean = fSpeGausOnly->GetParameter(1) - f->GetParameter(1);
+		double speIntegral = fSpeGausOnly->Integral(-50e-12, 100e-12, 1e-16)/binWidth;
+		stringstream ss;
+		ss << padName.c_str() << "   ";
+		ss << expWeightedIntegral << "   ";
+		ss << speMean;
+		ss << "  ==>  " << (expWeightedIntegral*expWeightSum + speMean*speIntegral) / (expWeightSum + speIntegral);
+		ss << std::endl;
+		cout << ss.str();
+		if(outtxt != nullptr) *outtxt << ss.str();
 	}
+	if(outPdfName != nullptr){
+		cSpe->Print((*outPdfName).c_str());
+	}
+
+/*	// TEMPORARY DRAWING FOR YURY'S PUBLICATION
+	TCanvas *cSpeSelected = new TCanvas("cSpeSelected","cSpeSelected",1600,800);
+	cSpeSelected->cd();
+	gPad->SetGrid(true, true);
+	gPad->SetMargin(0.07, 0.003, 0.1, 0.01);
+	TGraph *gr = (TGraph*)(vGain->at(1)->grSpeCharge->Clone());
+	gStyle->SetOptStat("");
+	float startBin = -10.7e-12;
+	int nBins = 75;
+	TH1D* h = new TH1D("h","", nBins, startBin, startBin+nBins*1e-12);
+	for(UInt_t ipoint=0; ipoint<gr->GetN(); ipoint++){
+		double x=0, y=0;
+		gr->GetPoint(ipoint, x, y);
+		h->Fill(x, y);
+		cout << ">> " << ipoint << " " << x << " " << y << endl;
+	}
+	fontsize = 0.04;
+	h->GetXaxis()->SetTitle("Charge [pWb]");
+	h->GetYaxis()->SetTitle("Counts");
+	h->GetXaxis()->SetLabelSize(fontsize);
+	h->GetXaxis()->SetTitleSize(fontsize*1.15);
+	h->GetXaxis()->SetTitleOffset(1.0);
+//	h->GetXaxis()->SetNdivisions(4);
+	h->GetYaxis()->SetLabelSize(fontsize);
+	h->GetYaxis()->SetTitleSize(fontsize*1.15);
+	h->GetYaxis()->SetTitleOffset(0.75);
+	h->SetLineColor(kBlack);
+	h->SetLineWidth(1);
+	h->SetFillColor(kYellow-9);
+	h->GetYaxis()->SetRangeUser(1,2e4);
+	h->Draw("");
+	TF1* f = (TF1*)(gr->GetListOfFunctions()->At(0));
+	f->SetNpx(1000);
+	f->SetLineWidth(2);
+	f->Draw("same");
+	f->Print();
+	cout << "fTitle = " << f->GetTitle() << endl;
+	for(int i=0; i<f->GetNpar(); i++){
+		cout << " Par  " << i << " \t\t" << f->GetParName(i) << " = " << f->GetParameter(i) << " +/- " << f->GetParError(i) << endl;
+	}
+*/
+
+/*	string padName = gr->GetTitle();
+	gr->SetTitle("");
+	padName = padName.substr(padName.find_first_of('-')+1);
+	DrawTextNdc(padName, 0.78, 0.88, 0.08, kBlack, 0);
+
+	// Extract selected fit parameters
+	TF1* f = (TF1*)(gr->GetListOfFunctions()->At(gr->GetListOfFunctions()->GetSize()-1));
+	if(f==NULL){
+		return;
+	}
+	uint16_t icnt = 0;
+	for(int ipar=0; ipar<8; ipar++){
+		if((ipar == 1) || (ipar == 2) || (ipar == 4) || (ipar == 5)){
+			stringstream ssFitPar;
+			ssFitPar << "#font[8]{";
+			ssFitPar << left << setw(14) << f->GetParName(ipar);
+			ssFitPar.precision(3);
+			ssFitPar << setw(10) << right << f->GetParameter(ipar);
+			ssFitPar << " +/- ";
+			ssFitPar << setw(10) << right << f->GetParError(ipar);
+			ssFitPar << "}";
+			DrawTextNdc(ssFitPar.str(), 0.35, 0.8-icnt*0.06, 0.055, kRed-2, 0);
+			icnt++;
+		}
+	}
+*/
 }
 
-void TGainSpeAnalyser::FindCommonHvForTargetGain(double targetGain, double &commonHv, double &commonGain){
+void TCalibAnalyser::FindCommonHvForTargetGain(double targetGain, double &commonHv, double &commonGain){
 	// Find starting point for a minimizer as average hv (x)
 	commonHv=0;
 	// Get average x for four quadrants
@@ -456,7 +598,7 @@ void TGainSpeAnalyser::FindCommonHvForTargetGain(double targetGain, double &comm
 	}
 }
 
-void TGainSpeAnalyser::DrawZoomedGain(double targetGain, double commonHv, double commonGain){
+void TCalibAnalyser::DrawZoomedGain(double targetGain, double commonHv, double commonGain){
 	// Find range suitable for all curves
 	double dy = targetGain*0.4;
 	double x0min=1000, x1max=2000;
@@ -520,7 +662,7 @@ void TGainSpeAnalyser::DrawZoomedGain(double targetGain, double commonHv, double
 	DrawTextNdc(ssLabel.str(), 0.5, 0.18, 0.05, kBlack, 0);
 }
 
-void TGainSpeAnalyser::DrawGainCharge(){
+void TCalibAnalyser::DrawGainCharge(){
 	// Setup styles and colors
 	Color_t col[4] = {kRed, kMagenta+2, kBlue+1, kCyan+2};
 	for(uint16_t iq=0; iq<vGain->size(); iq++){
@@ -591,7 +733,7 @@ void TGainSpeAnalyser::DrawGainCharge(){
 	DrawZoomedGain(1e6, commonHv, commonGain);
 }
 
-void TGainSpeAnalyser::PrintGainCharge(){
+void TCalibAnalyser::PrintGainCharge(){
 	for(uint16_t iq=0; iq<vGain->size(); iq++){
 		TGraphErrors *gr = (TGraphErrors*)(vGain->at(iq)->grGain->Clone());
 		string mcpName = gr->GetName();
@@ -605,7 +747,7 @@ void TGainSpeAnalyser::PrintGainCharge(){
 	}
 }
 
-int TGainSpeAnalyser::SaveAndCloseOutputFiles(){
+int TCalibAnalyser::SaveAndCloseOutputFiles(){
 	fout->cd();
 	outMeasHvGain->Write();
 	outSpecHvGain->Write();
@@ -615,7 +757,7 @@ int TGainSpeAnalyser::SaveAndCloseOutputFiles(){
 	return 0;
 }
 
-void TGainSpeAnalyser::DrawTextNdc(string s, double x, double y, double size, Color_t col, Float_t tangle){
+void TCalibAnalyser::DrawTextNdc(string s, double x, double y, double size, Color_t col, Float_t tangle){
 	TLatex *t = new TLatex(0,0,s.c_str());
 	t->SetTextAngle(tangle);
 	t->SetNDC();
@@ -626,7 +768,7 @@ void TGainSpeAnalyser::DrawTextNdc(string s, double x, double y, double size, Co
 	t->Draw();
 }
 
-void TGainSpeAnalyser::SetupPadAndSizes(TGraph *gr){
+void TCalibAnalyser::SetupPadAndSizes(TGraph *gr){
 	TGaxis::SetMaxDigits(4);
 	float lmargin = 0.17;
 	float rmargin = 0.02;

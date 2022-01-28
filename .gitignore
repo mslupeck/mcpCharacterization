@@ -1,10 +1,9 @@
 # Compiled source #
 ###################
-mcpCharacterization
-obj/
-outputs/
-inputs/
-.dep/
+build/
+*outputs/
+*inputs/
+*.dep/
 *__Dict.cpp
 *__Dict.h
 *.com

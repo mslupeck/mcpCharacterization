@@ -5,7 +5,7 @@
  *      Author: mss
  */
 
-#include "TSingleLeCroyWaveformLine.h"
+#include "../inc/TSingleLeCroyWaveformLine.h"
 
 namespace std {
 

@@ -5,7 +5,7 @@
  *      Author: mss
  */
 
-#include "TLeCroyWaveformFileReader.h"
+#include "../inc/TLeCroyWaveformFileReader.h"
 
 
 namespace std {
